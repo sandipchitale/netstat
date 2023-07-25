@@ -15,6 +15,11 @@ public class NetstatController {
         this.netstatService = netstatService;
     }
 
+    @GetMapping("/")
+    public int getNetstatLinesSize() {
+        return netstatService.getNetstatLines().size();
+    }
+
     @GetMapping("/netstat")
     public List<NetstatLine> getNetstatLines() {
         return netstatService.getNetstatLines();
