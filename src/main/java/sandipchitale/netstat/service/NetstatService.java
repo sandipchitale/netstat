@@ -18,14 +18,17 @@ public class NetstatService {
             try {
                 BufferedReader reader = new BufferedReader(new InputStreamReader(netstatProcess.getInputStream()));
                 String line;
-                line = reader.readLine();
-                line = reader.readLine();
-                line = reader.readLine();
-                line = reader.readLine();
-                if (line != null) {
-                    while ((line = reader.readLine()) != null) {
-                        netstatLines.add(NetstatLine.parse(line));
+                while ((line = reader.readLine()) != null) {
+                    String[] lineParts = line.trim().split("\\s+");
+                    // must have 5 parts (Proto, Local Address, Foreign Address, State, PID/Program name)
+                    if (lineParts.length != 5) {
+                        continue;
                     }
+                    // skip header line
+                    if (lineParts[0].equals("Proto")) {
+                        continue;
+                    }
+                    netstatLines.add(NetstatLine.parse(line));
                 }
             } finally {
                 try {
