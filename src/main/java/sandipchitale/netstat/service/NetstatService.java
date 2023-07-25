@@ -25,8 +25,11 @@ public class NetstatService implements InitializingBean, DisposableBean {
         new Thread(() -> {
             try {
                 List<NetstatLine> netstatLines = new LinkedList<>();
-                netstatProcess = new ProcessBuilder().command("netstat", "-anop", "tcp", "10").start();
+                netstatProcess = new ProcessBuilder().command("netstat", "-anop", "tcp", "5").start();
                 BufferedReader reader = new BufferedReader(new InputStreamReader(netstatProcess.getInputStream()));
+                final long[] start = new long[]{1};
+                final long[] lastEntry =  new long[]{1};
+
                 String line;
                 while ((line = reader.readLine()) != null) {
                     String trimmedLine = line.trim();
@@ -34,17 +37,22 @@ public class NetstatService implements InitializingBean, DisposableBean {
                         continue;
                     }
                     if (trimmedLine.equals("Active Connections")) {
-                        final List<NetstatLine> finalNetstatLines = netstatLines;
-                        // New batch
+                        // New batch is starting
                         netstatLines = new LinkedList<>();
-                        // Expect the processing to finish after 2 seconds;
+                        start[0] = System.currentTimeMillis();
+                        // Save reference to the current batch
+                        final List<NetstatLine> finalNetstatLines = netstatLines;
+                        // Expect the processing to finish after 100 milliseconds
+                        // so we start a timer for 100 milliseconds from now
+                        // and then copy over the reference to
+                        // the one that is to be returned
                         Timer timer = new Timer();
                         timer.schedule(new TimerTask() {
                             @Override
                             public void run() {
-                                netstatLinesToReturn = finalNetstatLines;
+                                netstatLinesToReturn = new LinkedList<>(finalNetstatLines);
                             }
-                        }, 2000);
+                        }, 100);
                         continue;
                     }
                     String[] lineParts = trimmedLine.split("\\s+");
@@ -56,7 +64,8 @@ public class NetstatService implements InitializingBean, DisposableBean {
                     if (lineParts[0].equals("Proto")) {
                         continue;
                     }
-                    netstatLines.add(NetstatLine.parse(line));
+                    lastEntry[0] = System.currentTimeMillis();
+                    netstatLines.add(NetstatLine.parse(lastEntry[0], line));
                 }
             } catch (IOException ignore) {
             }

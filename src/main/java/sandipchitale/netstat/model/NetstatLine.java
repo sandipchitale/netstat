@@ -1,6 +1,6 @@
 package sandipchitale.netstat.model;
 
-public record NetstatLine(Proto proto, String localAddress, int localPort, IPVersion localAddressIPVersion, String foreignAddress, int foreignPort, IPVersion foreignAddressIPVersion, State state, int pid) {
+public record NetstatLine(long timestamp, Proto proto, String localAddress, int localPort, IPVersion localAddressIPVersion, String foreignAddress, int foreignPort, IPVersion foreignAddressIPVersion, State state, int pid) {
     public enum IPVersion {
         IPv4,
         IPv6,
@@ -79,8 +79,9 @@ public record NetstatLine(Proto proto, String localAddress, int localPort, IPVer
         }
     }
 
-    public NetstatLine(String proto, String localAddressPort, String foreignAddressPort, String state, String pid) {
-        this(getProto(proto),
+    public NetstatLine(long timestamp, String proto, String localAddressPort, String foreignAddressPort, String state, String pid) {
+        this(timestamp,
+                getProto(proto),
                 getAddress(localAddressPort),
                 getPort(localAddressPort),
                 getIPVersion(getAddress(localAddressPort)),
@@ -92,8 +93,8 @@ public record NetstatLine(Proto proto, String localAddress, int localPort, IPVer
         );
     }
 
-    public static NetstatLine parse(String line) {
+    public static NetstatLine parse(long timestamp,String line) {
         String[] tokens = line.trim().split("\\s+");
-        return new NetstatLine(tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]);
+        return new NetstatLine(timestamp, tokens[0], tokens[1], tokens[2], tokens[3], tokens[4]);
     }
 }
