@@ -22,7 +22,7 @@ public class NetstatService implements InitializingBean, DisposableBean {
 
     @Override
     public void afterPropertiesSet() throws Exception {
-        new Thread(() -> {
+        Thread thread = new Thread(() -> {
             try {
                 List<NetstatLine> netstatLines = new LinkedList<>();
                 netstatProcess = new ProcessBuilder().command("netstat", "-anop", "tcp", "5").start();
@@ -51,6 +51,7 @@ public class NetstatService implements InitializingBean, DisposableBean {
                             @Override
                             public void run() {
                                 netstatLinesToReturn = new LinkedList<>(finalNetstatLines);
+                                timer.cancel();
                             }
                         }, 100);
                         continue;
@@ -69,7 +70,10 @@ public class NetstatService implements InitializingBean, DisposableBean {
                 }
             } catch (IOException ignore) {
             }
-        }).start();
+        });
+        thread.setDaemon(true);
+        thread.setName("Netstat");
+        thread.start();
     }
 
     @Override
