@@ -16,12 +16,12 @@ public class NetstatController {
     }
 
     @GetMapping("/")
-    public int getNetstatLinesSize() {
-        return netstatService.getNetstatLines().size();
-    }
-
-    @GetMapping("/netstat")
     public List<NetstatLine> getNetstatLines() {
         return netstatService.getNetstatLines();
+    }
+
+    @GetMapping("/size")
+    public int getNetstatLinesSize() {
+        return netstatService.getNetstatLines().size();
     }
 }
