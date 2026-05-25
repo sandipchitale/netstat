@@ -1,0 +1,29 @@
+# Swift / Swift Package Manager
+.build/
+Packages/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon\r
+._*
+.DocumentRevisions-V100
+.SyncID
+.SyncState
+.Spotlight-V100
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# IDE / Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+netstat.app/
