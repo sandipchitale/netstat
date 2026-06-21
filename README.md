@@ -19,10 +19,17 @@ Designed with modern macOS titlebar controls, resizable columns, and a clean min
    - **Resizable Columns**: User-adjustable column widths to fit process names and ports.
    - **Sorting**: Native sorting on headers (defaults to sorting by Local Port).
    - **Selection**: Selecting rows highlights them.
-5. **Process Termination**:
+5. **Process Inspector**: Click the **(i)** next to a PID to open a resizable window showing, for that process:
+   - the **full launch command** (`ps -ww -o command=`), wrapped and selectable;
+   - the **working directory** (`lsof -d cwd`);
+   - the **environment** it was launched with — a sorted `KEY=value` list read via the `KERN_PROCARGS2` sysctl (the same source `ps` uses);
+   - the originating connection's state and local/remote address, plus a **Kill Process** button that terminates it and refreshes the table.
+   - Details for processes owned by other users may be unavailable without elevated privileges.
+6. **Process Termination**:
    - Hover actions or a right-click context menu option to terminate listening processes.
    - Support for **Normal Kill** and **Sudo Kill** (authenticates securely via standard macOS system authorization dialogs).
-6. **Port Filter Bar**: Search connections by PID/process name/IP, or monitor specific comma-separated port numbers (e.g. `80, 443, 8080`).
+   - Killing from the table or the inspector immediately refreshes the listing so the row disappears.
+7. **Port Filter Bar**: Search connections by PID/process name/IP, or monitor specific comma-separated port numbers (e.g. `80, 443, 8080`).
 
 ---
 
@@ -57,7 +64,7 @@ Spotlight.
 
 ## Code Architecture
 
-- **`Sources/Connection.swift`**: Models a parsed socket connection structure containing comparable and queryable keys.
-- **`Sources/ConnectionMonitor.swift`**: Asynchronously calls `lsof` to capture networking metrics in a single-pass O(N) filter pass, controls the auto-refresh timer, and handles process termination.
-- **`Sources/ContentView.swift`**: The main GUI containing the titlebar layout, input forms, and resizable data table.
-- **`Sources/NetstatApp.swift`**: Sets up the app window group with ideal size constraints of 1800x900.
+- **`Sources/Connection.swift`**: Models a parsed socket connection (`Codable`/`Hashable` so it can be passed as a window value), including the dual-stack protocol type.
+- **`Sources/ConnectionMonitor.swift`**: Asynchronously calls `lsof` to capture networking metrics in a single-pass O(N) filter pass, controls the auto-refresh timer, terminates processes, and fetches per-process details (full command via `ps`, working directory via `lsof`, environment via the `KERN_PROCARGS2` sysctl).
+- **`Sources/ContentView.swift`**: The main GUI (titlebar layout, filters, resizable table) plus `CommandWindow`, the per-process inspector window.
+- **`Sources/NetstatApp.swift`**: Defines the app scenes — the main window and the resizable "Launch Command" `WindowGroup` — sharing a single `ConnectionMonitor` so any window can refresh the table.
