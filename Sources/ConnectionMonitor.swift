@@ -11,7 +11,7 @@ class ConnectionMonitor {
     var lastRefreshedDate: Date? = Date()
     
     // Refresh configuration
-    var isAutoRefreshEnabled = false {
+    var isAutoRefreshEnabled = true {
         didSet {
             setupTimer()
         }
@@ -30,15 +30,22 @@ class ConnectionMonitor {
         }
     }
     
-    // Filter States (Initially show IPv4 and Listening ports only)
-    var searchText = ""
-    var filterIPv4 = true
-    var filterIPv6 = false
-    var filterListen = true
-    var filterEstablished = false
-    var filterCloseWait = false
-    var filterTimeWait = false
-    var filterOthers = false
+    // Filter States (Initially show IPv4 and Listening ports only).
+    // Changing any of these re-renders the table, so we restamp the
+    // "last updated" time to reflect that the displayed set just changed.
+    var searchText = "" { didSet { markDisplayUpdated() } }
+    var filterIPv4 = true { didSet { markDisplayUpdated() } }
+    var filterIPv6 = false { didSet { markDisplayUpdated() } }
+    var filterListen = true { didSet { markDisplayUpdated() } }
+    var filterEstablished = false { didSet { markDisplayUpdated() } }
+    var filterCloseWait = false { didSet { markDisplayUpdated() } }
+    var filterTimeWait = false { didSet { markDisplayUpdated() } }
+    var filterOthers = false { didSet { markDisplayUpdated() } }
+
+    /// Restamp the displayed-data timestamp without refetching.
+    private func markDisplayUpdated() {
+        lastRefreshedDate = Date()
+    }
     
     // Sorting order state
     var sortOrder = [KeyPathComparator(\Connection.localPortSortValue, order: .forward)]

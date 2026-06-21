@@ -276,9 +276,9 @@ struct DetailView: View {
                             .foregroundStyle(.red)
                     } else {
                         Circle()
-                            .fill(.green)
+                            .fill(monitor.isAutoRefreshEnabled ? .green : .secondary)
                             .frame(width: 8, height: 8)
-                        Text("Service running")
+                        Text(monitoringStatusText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -294,8 +294,9 @@ struct DetailView: View {
                 
                 if let lastRefreshed = monitor.lastRefreshedDate {
                     Text("Last updated: \(lastRefreshedString(lastRefreshed))")
-                        .font(.caption)
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .frame(width: 170, alignment: .trailing)
                 }
             }
             .padding(.horizontal)
@@ -346,6 +347,16 @@ struct DetailView: View {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
         return formatter.string(from: date)
+    }
+
+    private var monitoringStatusText: String {
+        guard monitor.isAutoRefreshEnabled else { return "Monitoring: Off" }
+        let seconds = monitor.refreshInterval
+        let intervalText = seconds == seconds.rounded()
+            ? String(Int(seconds))
+            : String(format: "%g", seconds)
+        let unit = seconds == 1 ? "second" : "seconds"
+        return "Monitoring: On (every \(intervalText) \(unit))"
     }
 }
 
