@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var monitor = ConnectionMonitor()
-    
+    @Bindable var monitor: ConnectionMonitor
+
     // Theme Switcher State
     @State private var selectedTheme: Theme = .system
     
@@ -121,6 +121,9 @@ struct DetailView: View {
     @State private var showingKillConfirmation = false
     @State private var killingStatusMessage: String? = nil
     @State private var showingStatusAlert = false
+
+    // Opens the resizable "Launch Command" window for a process.
+    @Environment(\.openWindow) private var openWindow
     
     var body: some View {
         // Pre-declare each table column as a local variable.
@@ -156,7 +159,9 @@ struct DetailView: View {
         .width(min: 80, ideal: 110, max: 150)
         
         let col7 = TableColumn("PROCESS / PID", value: \Connection.command) { (conn: Connection) in
-            ProcessCell(command: conn.command, pid: conn.pid)
+            ProcessCell(command: conn.command, pid: conn.pid) {
+                showInfo(for: conn)
+            }
         }
         .width(min: 120, ideal: 170, max: 250)
         
@@ -320,7 +325,11 @@ struct DetailView: View {
             }
         }
     }
-    
+
+    private func showInfo(for conn: Connection) {
+        openWindow(id: "command-info", value: conn)
+    }
+
     private func killProcess(_ conn: Connection, useSudo: Bool) {
         Task {
             do {
@@ -391,15 +400,150 @@ struct PortCell: View {
 struct ProcessCell: View {
     let command: String
     let pid: Int
-    
+    let onInfo: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(command)
                 .fontWeight(.semibold)
                 .lineLimit(1)
-            Text("PID: \(String(pid))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                Text("PID: \(String(pid))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(action: onInfo) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .help("Show the full command that launched this process")
+            }
+        }
+    }
+}
+
+// A real, freely-resizable window showing the full launch command for a
+// process. Fetches its own data via `.task` (reliable here since it is a
+// top-level window, not a Table-cell popover/sheet).
+struct CommandWindow: View {
+    let connection: Connection
+    let monitor: ConnectionMonitor
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var fullCommand: String = ""
+    @State private var isLoading = true
+    @State private var showingKillConfirmation = false
+    @State private var killError: String? = nil
+    @State private var showingKillError = false
+
+    private var localPortText: String {
+        connection.localPort.map(String.init) ?? "*"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "terminal")
+                    .foregroundStyle(.secondary)
+                Text("\(connection.command)  ·  PID \(String(connection.pid))")
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+            }
+
+            // Which connection row this command was opened from.
+            HStack(spacing: 8) {
+                StateBadge(state: connection.state)
+                Text("\(connection.localAddress):\(localPortText)")
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if let remote = connection.remoteAddress, let rport = connection.remotePort {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("\(remote):\(String(rport))")
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading command…")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                ScrollView(.vertical) {
+                    Text(fullCommand)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(10)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                HStack {
+                    Button(role: .destructive) {
+                        showingKillConfirmation = true
+                    } label: {
+                        Label("Kill Process", systemImage: "xmark.octagon.fill")
+                    }
+                    .tint(.red)
+
+                    Spacer()
+
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(fullCommand, forType: .string)
+                    } label: {
+                        Label("Copy Command", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 600, minHeight: 360)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle("Launch Command — \(connection.command) (PID \(connection.pid))")
+        .task(id: connection.pid) {
+            isLoading = true
+            fullCommand = await ConnectionMonitor.fetchFullCommand(pid: connection.pid)
+            isLoading = false
+        }
+        .alert("Terminate Process?", isPresented: $showingKillConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Normal Kill") { kill(useSudo: false) }
+            Button("Sudo Kill (requires password)", role: .destructive) { kill(useSudo: true) }
+        } message: {
+            Text("Terminate '\(connection.command)' (PID \(connection.pid)) on port \(localPortText)?\n\nIf it belongs to the system or another user, Sudo Kill will request administrator privileges.")
+        }
+        .alert("Could Not Terminate Process", isPresented: $showingKillError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(killError ?? "")
+        }
+    }
+
+    private func kill(useSudo: Bool) {
+        Task {
+            do {
+                try await ConnectionMonitor.performKill(pid: connection.pid, useSudo: useSudo)
+                monitor.refresh() // update the main table so the row disappears
+                dismiss()         // process is gone; close this window
+            } catch {
+                killError = error.localizedDescription
+                showingKillError = true
+            }
         }
     }
 }

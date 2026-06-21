@@ -26,4 +26,6 @@ Icon\r
 *.swp
 *~
 
+# The assembled app bundle is a build artifact — recreate it with ./build-app.sh.
+# Its source inputs (Info.plist, AppIcon.icns) live in packaging/ and ARE tracked.
 netstat.app/

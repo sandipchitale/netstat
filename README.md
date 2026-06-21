@@ -26,33 +26,32 @@ Designed with modern macOS titlebar controls, resizable columns, and a clean min
 
 ---
 
-## App Installation
+## Build & Install
 
-We package the production release build of the application directly as a standard macOS app container.
-
-### How to Install
-1. Open Finder at the root workspace directory.
-2. Locate `netstat.app` (which displays with the custom minimalist line-art icon).
-3. Drag and drop `netstat.app` into your **Applications** folder.
-4. Launch **TCP Port Monitor** from your Launchpad, Applications folder, or Spotlight.
-
----
-
-## How to Build Manually
-
-To rebuild the project and package it:
+The `netstat.app` bundle is a **build artifact** and is not committed to git — it
+is recreated from source by `build-app.sh`. The bundle's inputs (`Info.plist`,
+`AppIcon.icns`) live in `packaging/` and are version-controlled.
 
 ```bash
-# 1. Compile release binary
-swift build -c release
+# Build the release binary and assemble ./netstat.app
+./build-app.sh
 
-# 2. Copy the binary into the app bundle container
-cp .build/release/netstat netstat.app/Contents/MacOS/netstat
-chmod +x netstat.app/Contents/MacOS/netstat
+# Build, then copy the bundle into /Applications
+./build-app.sh --install
 
-# 3. Compile and refresh the application icon (using helper script)
-./.gemini/antigravity-ide/scratch/create_icons.sh
+# Build, install, and (re)launch the app
+./build-app.sh --install --run
 ```
+
+To install manually instead, drag the freshly built `netstat.app` into your
+**Applications** folder, then launch **TCP Port Monitor** from Launchpad or
+Spotlight.
+
+### Project layout
+- `Sources/` — Swift source (compiled by SwiftPM; see `Package.swift`).
+- `packaging/` — app bundle inputs: `Info.plist` and `AppIcon.icns`.
+- `build-app.sh` — compiles the binary and assembles `netstat.app`.
+- `netstat.app/` — generated bundle (git-ignored).
 
 ---
 

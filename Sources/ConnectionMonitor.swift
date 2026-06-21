@@ -348,11 +348,52 @@ class ConnectionMonitor {
         return (s, nil)
     }
     
-    // Kill Process
-    func killProcess(pid: Int, useSudo: Bool) async throws {
+    // Fetch the full command line that launched a process via `ps`.
+    // Always returns a non-empty string: the command on success, or a short
+    // diagnostic (exit code / stderr / launch error) on failure so the UI is
+    // never silently blank.
+    nonisolated static func fetchFullCommand(pid: Int) async -> String {
+        return await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/ps")
+            // -ww: do not truncate the output; -o command=: print full argv with no header.
+            process.arguments = ["-ww", "-o", "command=", "-p", String(pid)]
+
+            let outPipe = Pipe()
+            let errPipe = Pipe()
+            process.standardOutput = outPipe
+            process.standardError = errPipe
+
+            do {
+                try process.run()
+            } catch {
+                return "Unable to launch /bin/ps: \(error.localizedDescription)"
+            }
+
+            // Read before waiting to avoid any pipe-buffer stall, then wait.
+            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+
+            let out = (String(data: outData, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !out.isEmpty { return out }
+
+            let err = (String(data: errData, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if process.terminationStatus != 0 || !err.isEmpty {
+                return "ps exited \(process.terminationStatus)\(err.isEmpty ? "" : ": \(err)")"
+            }
+            return "No command reported for PID \(pid) (process may have exited)."
+        }.value
+    }
+
+    // Performs the actual SIGKILL (optionally via sudo). Standalone so it can
+    // be invoked from any view, including the separate Launch Command window.
+    nonisolated static func performKill(pid: Int, useSudo: Bool) async throws {
         try await Task.detached(priority: .userInitiated) {
             let process = Process()
-            
+
             if useSudo {
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
                 process.arguments = ["-e", "do shell script \"kill -9 \(pid)\" with administrator privileges"]
@@ -360,16 +401,20 @@ class ConnectionMonitor {
                 process.executableURL = URL(fileURLWithPath: "/bin/kill")
                 process.arguments = ["-9", String(pid)]
             }
-            
+
             try process.run()
             process.waitUntilExit()
-            
+
             if process.terminationStatus != 0 {
                 let errorMsg = useSudo ? "Sudo authentication cancelled or failed." : "Failed to kill process (requires sudo?)."
                 throw NSError(domain: "KillError", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: errorMsg])
             }
         }.value
-        
+    }
+
+    // Kill Process
+    func killProcess(pid: Int, useSudo: Bool) async throws {
+        try await ConnectionMonitor.performKill(pid: pid, useSudo: useSudo)
         refresh()
     }
 }

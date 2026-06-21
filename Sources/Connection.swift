@@ -1,6 +1,6 @@
 import Foundation
 
-struct Connection: Identifiable, Hashable, Sendable {
+struct Connection: Identifiable, Hashable, Sendable, Codable {
     var id: String {
         return "\(pid)-\(fd)-\(type.rawValue)-\(localAddress)-\(localPort ?? 0)-\(remoteAddress ?? "")-\(remotePort ?? 0)-\(state.rawValue)"
     }
