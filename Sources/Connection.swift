@@ -27,6 +27,7 @@ struct Connection: Identifiable, Hashable, Sendable {
     enum ProtocolType: String, Codable, CaseIterable, Sendable {
         case ipv4 = "IPv4"
         case ipv6 = "IPv6"
+        case dualStack = "IPv4/6"
         case unknown = "Unknown"
         
         static func from(string: String) -> ProtocolType {

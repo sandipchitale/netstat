@@ -103,8 +103,18 @@ class ConnectionMonitor {
             
             result = result.filter { conn in
                 // 1. IP Protocol Filter
-                if conn.type == .ipv4 && !filterIPv4 { return false }
-                if conn.type == .ipv6 && !filterIPv6 { return false }
+                switch conn.type {
+                case .ipv4:
+                    if !filterIPv4 { return false }
+                case .ipv6:
+                    if !filterIPv6 { return false }
+                case .dualStack:
+                    // Dual-stack listeners are reachable over both protocols, so
+                    // show them whenever either IPv4 or IPv6 is enabled.
+                    if !filterIPv4 && !filterIPv6 { return false }
+                case .unknown:
+                    break
+                }
                 
                 // 2. TCP State Filter
                 if !shouldShowState(conn.state) { return false }
@@ -219,6 +229,12 @@ class ConnectionMonitor {
             if connectionType == .ipv6 {
                 if localAddress.contains(".") && !localAddress.contains(":") {
                     connectionType = .ipv4
+                } else if localAddress == "*" {
+                    // A wildcard IPv6 listener on macOS is dual-stack by default
+                    // (IPV6_V6ONLY off), so it accepts IPv4 connections too. lsof
+                    // reports it as IPv6; netstat shows it as tcp46. Common for
+                    // Java/Tomcat/Spring Boot servers.
+                    connectionType = .dualStack
                 }
             }
             

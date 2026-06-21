@@ -8,20 +8,21 @@ Designed with modern macOS titlebar controls, resizable columns, and a clean min
 
 ## Key Features
 
-1. **Active TCP Ports Listing**: Displays process details, PID, protocol type (IPv4/IPv6), local/remote addresses and ports, TCP states, and user details (login username and UID).
-2. **Titlebar-Integrated Controls**:
-   - **IP Version Toggles**: Inline button stripe to filter between IPv4 and IPv6.
+1. **Active TCP Ports Listing**: Displays process details, PID, protocol type (IPv4/IPv6/IPv4-6), local/remote addresses and ports, TCP states, and user details (login username and UID).
+2. **Dual-Stack Awareness**: Wildcard listeners that `lsof` reports as IPv6 but actually accept both protocols (`tcp46`, e.g. Java/Tomcat/Spring Boot servers binding `*:8443`) are detected and tagged **IPv4/6**, so they remain visible under either the IPv4 or IPv6 filter.
+3. **Titlebar-Integrated Controls**:
+   - **IP Version Toggles**: Inline button stripe to filter between IPv4 and IPv6 (dual-stack listeners show under either).
    - **TCP State Toggles**: Inline button stripe to filter by connection state (`LISTEN`, `ESTABLISHED`, `CLOSE_WAIT`, `TIME_WAIT`, `Others`).
    - **Theme Selector**: Segmented control to switch between **Light**, **Dark**, and **System** themes.
    - **Auto-Refresh controls**: Integrated clock toggle, interval menu (1s to 60s), and manual refresh button.
-3. **Table Interaction**:
+4. **Table Interaction**:
    - **Resizable Columns**: User-adjustable column widths to fit process names and ports.
    - **Sorting**: Native sorting on headers (defaults to sorting by Local Port).
    - **Selection**: Selecting rows highlights them.
-4. **Process Termination**:
+5. **Process Termination**:
    - Hover actions or a right-click context menu option to terminate listening processes.
    - Support for **Normal Kill** and **Sudo Kill** (authenticates securely via standard macOS system authorization dialogs).
-5. **Port Filter Bar**: Search connections by PID/process name/IP, or monitor specific comma-separated port numbers (e.g. `80, 443, 8080`).
+6. **Port Filter Bar**: Search connections by PID/process name/IP, or monitor specific comma-separated port numbers (e.g. `80, 443, 8080`).
 
 ---
 

@@ -343,15 +343,24 @@ struct DetailView: View {
 // Custom Cell Views to assist Swift compiler type-checking speed
 struct TypeCell: View {
     let type: Connection.ProtocolType
-    
+
+    private var badgeColor: Color {
+        switch type {
+        case .ipv4: return .blue
+        case .ipv6: return .purple
+        case .dualStack: return .green
+        case .unknown: return .gray
+        }
+    }
+
     var body: some View {
         Text(type.rawValue)
             .font(.caption)
             .fontWeight(.bold)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(type == .ipv4 ? Color.blue.opacity(0.15) : Color.purple.opacity(0.15))
-            .foregroundStyle(type == .ipv4 ? .blue : .purple)
+            .background(badgeColor.opacity(0.15))
+            .foregroundStyle(badgeColor)
             .cornerRadius(4)
     }
 }
