@@ -432,14 +432,35 @@ struct CommandWindow: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    enum DetailTab: String, CaseIterable, Identifiable {
+        case command = "Command"
+        case environment = "Environment"
+        var id: String { rawValue }
+    }
+
     @State private var fullCommand: String = ""
+    @State private var workingDirectory: String? = nil
+    @State private var environment: [String] = []
     @State private var isLoading = true
+    @State private var selectedTab: DetailTab = .command
     @State private var showingKillConfirmation = false
     @State private var killError: String? = nil
     @State private var showingKillError = false
 
     private var localPortText: String {
         connection.localPort.map(String.init) ?? "*"
+    }
+
+    // Text currently shown / copied, based on the selected tab.
+    private var shownText: String {
+        switch selectedTab {
+        case .command:
+            return fullCommand
+        case .environment:
+            return environment.isEmpty
+                ? "Environment unavailable — the process may have exited, or it belongs to another user (requires privileges)."
+                : environment.joined(separator: "\n")
+        }
     }
 
     var body: some View {
@@ -468,18 +489,40 @@ struct CommandWindow: View {
                 }
             }
 
+            // Working directory of the process.
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text(workingDirectory ?? (isLoading ? "…" : "Working directory unavailable"))
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
             Divider()
 
             if isLoading {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Reading command…")
+                    Text("Reading process details…")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
+                Picker("", selection: $selectedTab) {
+                    ForEach(DetailTab.allCases) { tab in
+                        Text(tab == .environment && !environment.isEmpty ? "Environment (\(environment.count))" : tab.rawValue)
+                            .tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+
                 ScrollView(.vertical) {
-                    Text(fullCommand)
+                    Text(shownText)
                         .font(.system(.callout, design: .monospaced))
                         .textSelection(.enabled)
                         .lineSpacing(2)
@@ -504,9 +547,9 @@ struct CommandWindow: View {
 
                     Button {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(fullCommand, forType: .string)
+                        NSPasteboard.general.setString(shownText, forType: .string)
                     } label: {
-                        Label("Copy Command", systemImage: "doc.on.doc")
+                        Label("Copy \(selectedTab.rawValue)", systemImage: "doc.on.doc")
                     }
                 }
             }
@@ -517,7 +560,12 @@ struct CommandWindow: View {
         .navigationTitle("Launch Command — \(connection.command) (PID \(connection.pid))")
         .task(id: connection.pid) {
             isLoading = true
-            fullCommand = await ConnectionMonitor.fetchFullCommand(pid: connection.pid)
+            async let command = ConnectionMonitor.fetchFullCommand(pid: connection.pid)
+            async let cwd = ConnectionMonitor.fetchWorkingDirectory(pid: connection.pid)
+            async let env = ConnectionMonitor.fetchEnvironment(pid: connection.pid)
+            fullCommand = await command
+            workingDirectory = await cwd
+            environment = await env
             isLoading = false
         }
         .alert("Terminate Process?", isPresented: $showingKillConfirmation) {

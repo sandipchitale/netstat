@@ -388,6 +388,88 @@ class ConnectionMonitor {
         }.value
     }
 
+    // Fetch the current working directory of a process via `lsof` (the `cwd`
+    // file descriptor). Returns nil if unavailable (e.g. owned by another user
+    // and not readable without privileges).
+    nonisolated static func fetchWorkingDirectory(pid: Int) async -> String? {
+        return await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            // -a AND-combines filters; -d cwd selects the cwd descriptor;
+            // -Fn emits a machine-readable "n<path>" line.
+            process.arguments = ["-a", "-d", "cwd", "-p", String(pid), "-Fn", "-P", "-n"]
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+
+            do { try process.run() } catch { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+
+            guard let out = String(data: data, encoding: .utf8) else { return nil }
+            for line in out.split(separator: "\n") where line.hasPrefix("n") {
+                let path = String(line.dropFirst())
+                return path.isEmpty ? nil : path
+            }
+            return nil
+        }.value
+    }
+
+    // Fetch a process's environment via the KERN_PROCARGS2 sysctl — the same
+    // mechanism `ps` uses. The returned buffer is laid out as:
+    //   [Int32 argc][exec_path\0][padding\0...][argv[0]\0]...[argv[argc-1]\0][env\0]...
+    // Returns sorted "KEY=value" strings, or [] if not readable (e.g. another
+    // user's process without privileges).
+    nonisolated static func fetchEnvironment(pid: Int) async -> [String] {
+        return await Task.detached(priority: .userInitiated) {
+            var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, Int32(pid)]
+            var size = 0
+            if sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) != 0 || size == 0 {
+                return []
+            }
+            var buffer = [CChar](repeating: 0, count: size)
+            if sysctl(&mib, UInt32(mib.count), &buffer, &size, nil, 0) != 0 {
+                return []
+            }
+
+            return buffer.withUnsafeBufferPointer { ptr -> [String] in
+                guard let base = ptr.baseAddress, size >= MemoryLayout<Int32>.size else { return [] }
+                let total = size
+                var offset = 0
+
+                var argc: Int32 = 0
+                memcpy(&argc, base, MemoryLayout<Int32>.size)
+                offset = MemoryLayout<Int32>.size
+
+                // Reads a NUL-terminated string at `offset`, advancing past the NUL.
+                func nextString() -> String? {
+                    guard offset < total else { return nil }
+                    let start = offset
+                    while offset < total && base[offset] != 0 { offset += 1 }
+                    guard offset < total else { return nil }
+                    let s = String(cString: base + start)
+                    offset += 1
+                    return s
+                }
+
+                _ = nextString()                                  // exec_path
+                while offset < total && base[offset] == 0 { offset += 1 } // alignment padding
+
+                var consumed: Int32 = 0                           // skip argv
+                while consumed < argc, nextString() != nil { consumed += 1 }
+
+                var env: [String] = []                            // remaining = environment
+                while offset < total {
+                    while offset < total && base[offset] == 0 { offset += 1 }
+                    guard let s = nextString(), !s.isEmpty else { break }
+                    env.append(s)
+                }
+                return env.sorted()
+            }
+        }.value
+    }
+
     // Performs the actual SIGKILL (optionally via sudo). Standalone so it can
     // be invoked from any view, including the separate Launch Command window.
     nonisolated static func performKill(pid: Int, useSudo: Bool) async throws {
