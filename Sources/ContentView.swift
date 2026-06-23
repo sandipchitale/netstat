@@ -481,7 +481,11 @@ struct CommandWindow: View {
         case command = "Command"
         case environment = "Environment"
         case systemProperties = "System Properties"
+        case classpath = "Classpath"
         var id: String { rawValue }
+
+        // Tabs that only apply to JVM processes.
+        var isJavaOnly: Bool { self == .systemProperties || self == .classpath }
     }
 
     @State private var fullCommand: String = ""
@@ -494,9 +498,23 @@ struct CommandWindow: View {
     @State private var killError: String? = nil
     @State private var showingKillError = false
 
-    // The System Properties tab only applies to JVM processes.
+    // The JVM-only tabs appear only for Java processes.
     private var availableTabs: [DetailTab] {
-        DetailTab.allCases.filter { $0 != .systemProperties || connection.isJava }
+        DetailTab.allCases.filter { !$0.isJavaOnly || connection.isJava }
+    }
+
+    // The individual java.class.path entries, split on the path separator.
+    private var classpathEntries: [String] {
+        guard let entry = systemProperties.first(where: { $0.hasPrefix("java.class.path=") }) else {
+            return []
+        }
+        let value = String(entry.dropFirst("java.class.path=".count))
+        return value.split(separator: ":", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    // System properties with java.class.path removed (it has its own tab).
+    private var systemPropertiesForDisplay: [String] {
+        systemProperties.filter { !$0.hasPrefix("java.class.path=") }
     }
 
     // Label for a tab, including a count for the list-bearing tabs.
@@ -507,7 +525,10 @@ struct CommandWindow: View {
         case .environment:
             return environment.isEmpty ? tab.rawValue : "Environment (\(environment.count))"
         case .systemProperties:
-            return systemProperties.isEmpty ? tab.rawValue : "System Properties (\(systemProperties.count))"
+            let count = systemPropertiesForDisplay.count
+            return count == 0 ? tab.rawValue : "System Properties (\(count))"
+        case .classpath:
+            return classpathEntries.isEmpty ? tab.rawValue : "Classpath (\(classpathEntries.count))"
         }
     }
 
@@ -525,10 +546,35 @@ struct CommandWindow: View {
                 ? "Environment unavailable — the process may have exited, or it belongs to another user (requires privileges)."
                 : environment.joined(separator: "\n")
         case .systemProperties:
-            return systemProperties.isEmpty
+            return systemPropertiesForDisplay.isEmpty
                 ? "System properties unavailable — jcmd could not attach (the JVM may have exited, or it belongs to another user)."
-                : systemProperties.joined(separator: "\n")
+                : systemPropertiesForDisplay.joined(separator: "\n")
+        case .classpath:
+            return classpathEntries.isEmpty
+                ? "No java.class.path reported for this process."
+                : classpathEntries.joined(separator: "\n")
         }
+    }
+
+    // Each java.class.path entry on its own selectable row, numbered.
+    private var classpathList: some View {
+        List(Array(classpathEntries.enumerated()), id: \.offset) { index, entry in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(index + 1)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 28, alignment: .trailing)
+                Text(entry)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(entry)
+            }
+        }
+        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     var body: some View {
@@ -589,19 +635,23 @@ struct CommandWindow: View {
                 .labelsHidden()
                 .fixedSize()
 
-                ScrollView(.vertical) {
-                    Text(shownText)
-                        .font(.system(.callout, design: .monospaced))
-                        .textSelection(.enabled)
-                        .lineSpacing(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(10)
+                if selectedTab == .classpath && !classpathEntries.isEmpty {
+                    classpathList
+                } else {
+                    ScrollView(.vertical) {
+                        Text(shownText)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                            .lineSpacing(2)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(10)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
 
                 HStack {
                     Button(role: .destructive) {
