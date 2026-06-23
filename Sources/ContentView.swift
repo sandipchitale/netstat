@@ -159,12 +159,20 @@ struct DetailView: View {
         .width(min: 80, ideal: 110, max: 150)
         
         let col7 = TableColumn("PROCESS / PID", value: \Connection.command) { (conn: Connection) in
-            ProcessCell(command: conn.command, pid: conn.pid) {
-                showInfo(for: conn)
-            }
+            ProcessCell(command: conn.command, pid: conn.pid)
         }
         .width(min: 120, ideal: 170, max: 250)
+
+        let colInfo = TableColumn("INFO") { (conn: Connection) in
+            InfoCell { showInfo(for: conn) }
+        }
+        .width(min: 40, ideal: 44, max: 50)
         
+        let colJava = TableColumn("JAVA", value: \Connection.javaSortValue) { (conn: Connection) in
+            JavaBadge(isJava: conn.isJava)
+        }
+        .width(min: 45, ideal: 50, max: 60)
+
         let col8 = TableColumn("USER", value: \Connection.user) { (conn: Connection) in
             UserCell(user: conn.user, username: conn.username)
         }
@@ -242,15 +250,21 @@ struct DetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(connections, selection: $selectedConnectionID, sortOrder: $monitor.sortOrder) {
-                    col1
-                    col2
-                    col3
-                    col4
-                    col5
-                    col6
-                    col7
-                    col8
-                    col9
+                    Group {
+                        col1
+                        col2
+                        col3
+                        col4
+                        col5
+                        col6
+                    }
+                    Group {
+                        colJava
+                        col7
+                        col8
+                        colInfo
+                        col9
+                    }
                 }
                 .tableStyle(.inset)
                 .contextMenu(forSelectionType: Connection.ID.self) { selection in
@@ -360,6 +374,21 @@ struct DetailView: View {
     }
 }
 
+// Marks JVM processes with a coffee-cup glyph (Java's emblem) in the Java column.
+struct JavaBadge: View {
+    let isJava: Bool
+    var body: some View {
+        if isJava {
+            Image(systemName: "cup.and.saucer.fill")
+                .foregroundStyle(.brown)
+                .help("Java process — see the System Properties tab in its inspector")
+                .frame(maxWidth: .infinity)
+        } else {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+        }
+    }
+}
+
 // Custom Cell Views to assist Swift compiler type-checking speed
 struct TypeCell: View {
     let type: Connection.ProtocolType
@@ -411,26 +440,31 @@ struct PortCell: View {
 struct ProcessCell: View {
     let command: String
     let pid: Int
-    let onInfo: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(command)
                 .fontWeight(.semibold)
                 .lineLimit(1)
-            HStack(spacing: 5) {
-                Text("PID: \(String(pid))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button(action: onInfo) {
-                    Image(systemName: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-                .help("Show the full command that launched this process")
-            }
+            Text("PID: \(String(pid))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+    }
+}
+
+// The (i) inspector button, in its own column to the left of Actions.
+struct InfoCell: View {
+    let onInfo: () -> Void
+
+    var body: some View {
+        Button(action: onInfo) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.blue)
+        }
+        .buttonStyle(.plain)
+        .help("Show the full command that launched this process")
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -446,17 +480,36 @@ struct CommandWindow: View {
     enum DetailTab: String, CaseIterable, Identifiable {
         case command = "Command"
         case environment = "Environment"
+        case systemProperties = "System Properties"
         var id: String { rawValue }
     }
 
     @State private var fullCommand: String = ""
     @State private var workingDirectory: String? = nil
     @State private var environment: [String] = []
+    @State private var systemProperties: [String] = []
     @State private var isLoading = true
     @State private var selectedTab: DetailTab = .command
     @State private var showingKillConfirmation = false
     @State private var killError: String? = nil
     @State private var showingKillError = false
+
+    // The System Properties tab only applies to JVM processes.
+    private var availableTabs: [DetailTab] {
+        DetailTab.allCases.filter { $0 != .systemProperties || connection.isJava }
+    }
+
+    // Label for a tab, including a count for the list-bearing tabs.
+    private func tabLabel(_ tab: DetailTab) -> String {
+        switch tab {
+        case .command:
+            return tab.rawValue
+        case .environment:
+            return environment.isEmpty ? tab.rawValue : "Environment (\(environment.count))"
+        case .systemProperties:
+            return systemProperties.isEmpty ? tab.rawValue : "System Properties (\(systemProperties.count))"
+        }
+    }
 
     private var localPortText: String {
         connection.localPort.map(String.init) ?? "*"
@@ -471,6 +524,10 @@ struct CommandWindow: View {
             return environment.isEmpty
                 ? "Environment unavailable — the process may have exited, or it belongs to another user (requires privileges)."
                 : environment.joined(separator: "\n")
+        case .systemProperties:
+            return systemProperties.isEmpty
+                ? "System properties unavailable — jcmd could not attach (the JVM may have exited, or it belongs to another user)."
+                : systemProperties.joined(separator: "\n")
         }
     }
 
@@ -523,8 +580,8 @@ struct CommandWindow: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 Picker("", selection: $selectedTab) {
-                    ForEach(DetailTab.allCases) { tab in
-                        Text(tab == .environment && !environment.isEmpty ? "Environment (\(environment.count))" : tab.rawValue)
+                    ForEach(availableTabs) { tab in
+                        Text(tabLabel(tab))
                             .tag(tab)
                     }
                 }
@@ -574,9 +631,14 @@ struct CommandWindow: View {
             async let command = ConnectionMonitor.fetchFullCommand(pid: connection.pid)
             async let cwd = ConnectionMonitor.fetchWorkingDirectory(pid: connection.pid)
             async let env = ConnectionMonitor.fetchEnvironment(pid: connection.pid)
+            // Only attach via jcmd for JVM processes.
+            async let props = connection.isJava
+                ? ConnectionMonitor.fetchSystemProperties(pid: connection.pid)
+                : []
             fullCommand = await command
             workingDirectory = await cwd
             environment = await env
+            systemProperties = await props
             isLoading = false
         }
         .alert("Terminate Process?", isPresented: $showingKillConfirmation) {

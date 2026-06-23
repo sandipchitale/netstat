@@ -16,13 +16,25 @@ struct Connection: Identifiable, Hashable, Sendable, Codable {
     let remoteAddress: String?
     let remotePort: Int?
     let state: ConnectionState
-    
+
+    // Set during refresh: true when this PID is a JVM process (per `jps`, with the
+    // command-name heuristic as a fallback). Drives the Java column badge and the
+    // inspector's "System Properties" tab (populated via `jcmd VM.system_properties`).
+    var isJava: Bool = false
+
     // Sort helper computed properties (non-optional and Comparable)
     var localPortSortValue: Int { localPort ?? -1 }
     var remotePortSortValue: Int { remotePort ?? -1 }
     var remoteAddressSortValue: String { remoteAddress ?? "" }
     var typeSortValue: String { type.rawValue }
     var stateSortValue: String { state.rawValue }
+    var javaSortValue: Int { isJava ? 1 : 0 }  // Bool isn't Comparable
+
+    // Fallback Java detection from lsof's (truncated) command name, used when
+    // `jps` is unavailable or can't see the process (e.g. another user's JVM).
+    var commandSuggestsJava: Bool {
+        command == "java" || command.lowercased().contains("java")
+    }
     
     enum ProtocolType: String, Codable, CaseIterable, Sendable {
         case ipv4 = "IPv4"

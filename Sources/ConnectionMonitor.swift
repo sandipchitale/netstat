@@ -171,8 +171,15 @@ class ConnectionMonitor {
     
     nonisolated private static func fetchAndParse(ports: [Int]) async throws -> [Connection] {
         return try await Task.detached(priority: .userInitiated) {
+            // Run `jps` concurrently with `lsof` so Java detection adds no latency.
+            async let javaTask = fetchJavaPIDs()
             let output = try runLsof(ports: ports)
-            return parseLsofOutput(output)
+            var parsed = parseLsofOutput(output)
+            let javaPIDs = await javaTask
+            for i in parsed.indices {
+                parsed[i].isJava = javaPIDs.contains(parsed[i].pid) || parsed[i].commandSuggestsJava
+            }
+            return parsed
         }.value
     }
     
@@ -475,6 +482,137 @@ class ConnectionMonitor {
                 return env.sorted()
             }
         }.value
+    }
+
+    // MARK: - Java / JVM detection and inspection
+
+    // PIDs of all JVM processes, via `jps` (authoritative for the current user).
+    // Output is "<pid> <name>" lines; the leading token is the PID. Returns an
+    // empty set if no jps is found, in which case detection falls back to the
+    // command-name heuristic (`commandSuggestsJava`).
+    nonisolated private static func fetchJavaPIDs() async -> Set<Int> {
+        await Task.detached(priority: .utility) {
+            guard let jps = jpsPath() else { return [] }
+            let out = runCapture(jps, [])
+            var pids = Set<Int>()
+            for line in out.split(separator: "\n") {
+                if let tok = line.split(separator: " ").first, let pid = Int(tok) {
+                    pids.insert(pid)
+                }
+            }
+            return pids
+        }.value
+    }
+
+    // Finds a usable jps: the system stub, else the default JDK's bin/jps.
+    nonisolated private static func jpsPath() -> String? {
+        let fm = FileManager.default
+        if fm.isExecutableFile(atPath: "/usr/bin/jps") { return "/usr/bin/jps" }
+        let home = runCapture("/usr/libexec/java_home", [])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !home.isEmpty {
+            let candidate = (home as NSString).appendingPathComponent("bin/jps")
+            if fm.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return nil
+    }
+
+    // JVM system properties via `jcmd <pid> VM.system_properties`. Uses the jcmd
+    // shipped alongside the process's own `java` binary (so the attach protocol
+    // matches the target's Java version), falling back to a system jcmd.
+    nonisolated static func fetchSystemProperties(pid: Int) async -> [String] {
+        await Task.detached(priority: .userInitiated) {
+            let jcmd = jcmdPath(forPid: pid)
+            let out = runCapture(jcmd, [String(pid), "VM.system_properties"])
+            return parseSystemProperties(out)
+        }.value
+    }
+
+    // Locates the jcmd matching the target process's Java install: the executable
+    // path comes from `ps -o comm=`, and jcmd lives next to it in the same bin/.
+    nonisolated private static func jcmdPath(forPid pid: Int) -> String {
+        let comm = runCapture("/bin/ps", ["-o", "comm=", "-p", String(pid)])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !comm.isEmpty {
+            let dir = (comm as NSString).deletingLastPathComponent
+            let candidate = (dir as NSString).appendingPathComponent("jcmd")
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return "/usr/bin/jcmd"  // PATH/system fallback
+    }
+
+    // Parses `jcmd … VM.system_properties` (Java .properties format): drops the
+    // "<pid>:" header and "#"-comments, splits each "key=value" on the first
+    // unescaped '=', and unescapes Java property escapes. Returns sorted entries.
+    nonisolated static func parseSystemProperties(_ output: String) -> [String] {
+        var props: [String] = []
+        for raw in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw)
+            if line.hasPrefix("#") { continue }
+            if line.hasSuffix(":"), Int(line.dropLast()) != nil { continue }  // "<pid>:" header
+            guard let eq = firstUnescapedEquals(line) else { continue }
+            let key = unescapeProperty(String(line[line.startIndex..<eq]))
+            let value = unescapeProperty(String(line[line.index(after: eq)...]))
+            props.append("\(key)=\(value)")
+        }
+        return props.sorted()
+    }
+
+    nonisolated private static func firstUnescapedEquals(_ s: String) -> String.Index? {
+        var idx = s.startIndex
+        var escaped = false
+        while idx < s.endIndex {
+            let c = s[idx]
+            if escaped { escaped = false }
+            else if c == "\\" { escaped = true }
+            else if c == "=" { return idx }
+            idx = s.index(after: idx)
+        }
+        return nil
+    }
+
+    // Unescapes \\, \=, \:, \ , \#, \uXXXX etc. Keeps \n/\r/\t/\f as their literal
+    // two-character form so each property stays on a single display line.
+    nonisolated private static func unescapeProperty(_ s: String) -> String {
+        let chars = Array(s)
+        var out = ""
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            if c == "\\", i + 1 < chars.count {
+                let n = chars[i + 1]
+                switch n {
+                case "n", "r", "t", "f":
+                    out.append("\\"); out.append(n)  // keep readable, single-line
+                case "u" where i + 5 < chars.count:
+                    if let code = UInt32(String(chars[(i + 2)...(i + 5)]), radix: 16),
+                       let scalar = Unicode.Scalar(code) {
+                        out.append(Character(scalar)); i += 6; continue
+                    }
+                    out.append(n)
+                default:
+                    out.append(n)  // \: \= \\ \space \# … -> literal
+                }
+                i += 2
+            } else {
+                out.append(c); i += 1
+            }
+        }
+        return out
+    }
+
+    // Small synchronous capture helper for the short-lived JVM tools above.
+    nonisolated private static func runCapture(_ path: String, _ args: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do { try process.run() } catch { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     // Performs the actual SIGKILL (optionally via sudo). Standalone so it can
